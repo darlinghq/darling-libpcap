@@ -260,6 +260,8 @@ pcap_setup_pktap_interface(const char *device, char *ebuf)
 		 * Create a device instance when no unit number is specified
 		 */
 		sscanf(ifname, IPTAP_IFNAME "%d", &unit);
+	/* DARLING: Darling's xnu headers predate droptap */
+#ifdef DROPTAP_IFNAME
 	} else if (strncmp(device, DROPTAP_IFNAME, strlen(DROPTAP_IFNAME)) == 0) {
 		if_prefix = DROPTAP_IFNAME;
 
@@ -275,6 +277,7 @@ pcap_setup_pktap_interface(const char *device, char *ebuf)
 		 * Create a device instance when no unit number is specified
 		 */
 		sscanf(ifname, DROPTAP_IFNAME "%d", &unit);
+#endif /* DROPTAP_IFNAME */
 	} else {
 		snprintf(ebuf, PCAP_ERRBUF_SIZE, "bad device name: %s",
 				 pcap_strerror(errno));
@@ -520,7 +523,10 @@ pktap_create(const char *device, char *ebuf, int *is_ours)
 		device = "pktap";
 	if (strncmp(device, PKTAP_IFNAME, strlen(PKTAP_IFNAME)) != 0 &&
 		strncmp(device, IPTAP_IFNAME, strlen(IPTAP_IFNAME)) != 0 &&
+		/* DARLING: Darling's xnu headers predate droptap */
+#ifdef DROPTAP_IFNAME
 		strncmp(device, DROPTAP_IFNAME, strlen(DROPTAP_IFNAME)) != 0 &&
+#endif
 		strcmp(device, "all") != 0 &&
 		strcmp(device, "any") != 0) {
 		*is_ours = 0;
@@ -939,9 +945,13 @@ pcap_ng_dump_pktap_comment(pcap_t *pcap, pcap_dumper_t *dumper,
 	/*
 	 * The actual data packet is past the packet tap header
 	 */
+	/* DARLING: Darling's xnu headers predate droptap */
+#ifdef PTH_TYPE_DROP
 	if (pktp_hdr->pth_type_next == PTH_TYPE_DROP) {
 		pkt_data = sp + DROPTAP_HDR_SIZE((struct droptap_header *)sp);
-	} else {
+	} else
+#endif
+	{
 		pkt_data = sp + pktp_hdr->pth_length;
 	}
 	epb = pcap_ng_get_enhanced_packet_fields(block);
@@ -975,9 +985,13 @@ pcap_ng_dump_pktap_comment(pcap_t *pcap, pcap_dumper_t *dumper,
 	if (pktp_hdr->pth_flowid != 0) {
 		pcap_ng_block_add_option_with_value(block, PCAPNG_EPB_FLOW_ID , &pktp_hdr->pth_flowid, 4);
 	}
+	/* DARLING: Darling's xnu headers predate pth_trace_tag and droptap */
+#ifndef DARLING
 	if (pktp_hdr->pth_trace_tag != 0) {
 		pcap_ng_block_add_option_with_value(block, PCAPNG_EPB_TRACE_TAG , &pktp_hdr->pth_trace_tag, 2);
 	}
+#endif
+#ifdef PTH_TYPE_DROP
 	if (pktp_hdr->pth_type_next == PTH_TYPE_DROP) {
 		pcap_ng_block_add_option_with_value(block, PCAPNG_EPB_DROP_REASON, &((struct droptap_header *)pktp_hdr)->dth_dropreason, 4);
 		/*
@@ -989,6 +1003,7 @@ pcap_ng_dump_pktap_comment(pcap_t *pcap, pcap_dumper_t *dumper,
 			pcap_ng_block_add_option_with_string(block, PCAPNG_EPB_DROP_FUNC, ((struct droptap_header *)pktp_hdr)->dth_dropfunc);
 		}
 	}
+#endif /* PTH_TYPE_DROP */
 	if (comment != NULL && *comment != 0) {
 		pcap_ng_block_add_option_with_string(block, PCAPNG_OPT_COMMENT, comment);
 	}
@@ -1007,9 +1022,12 @@ pcap_ng_dump_pktap_comment(pcap_t *pcap, pcap_dumper_t *dumper,
 	if (pktp_hdr->pth_flags & PTH_FLAG_NEXUS_CHAN) {
 		pmdflags |= PCAPNG_EPB_PMDF_NEXUS_CHANNEL;
 	}
+	/* DARLING: Darling's xnu headers predate PTH_FLAG_WAKE_PKT */
+#ifdef PTH_FLAG_WAKE_PKT
 	if (pktp_hdr->pth_flags & PTH_FLAG_WAKE_PKT) {
 		pmdflags |= PCAPNG_EPB_PMDF_WAKE_PKT;
 	}
+#endif
 #ifdef PTH_FLAG_ULPN
 	if (pktp_hdr->pth_flags & PTH_FLAG_ULPN) {
 		pmdflags |= PCAPNG_EPB_PMDF_ULPN_PKT;
@@ -1151,6 +1169,8 @@ pcap_get_head_drop(pcap_t *p)
 int
 pcap_get_compression_stats(pcap_t *p, void *bufp, size_t buflen)
 {
+	/* DARLING: Darling's xnu headers predate BPF header compression */
+#ifdef BIOCGHDRCOMPSTATS
 	if (p->compression_mode == 1) {
 		struct bpf_comp_stats bcs;
 
@@ -1170,7 +1190,9 @@ pcap_get_compression_stats(pcap_t *p, void *bufp, size_t buflen)
 					   bcs.bcs_total_compressed_prefix_size,
 					   bcs.bcs_max_compressed_prefix_size);
 		return 0;
-	} else if (p->compression_mode == 2) {
+	} else
+#endif /* BIOCGHDRCOMPSTATS */
+	if (p->compression_mode == 2) {
 		(void)snprintf(bufp, buflen,
 					   "U tot_rd %llu tot_sz %llu tot_hdr_sz %llu no_prfx_cnt %llu prfx_cnt %llu tot_prfx_sz %llu max_prfx_sz %u",
 					   p->total_read,
@@ -1280,6 +1302,8 @@ pcap_read_bpf_header(pcap_t *p, u_char *bp, struct pcap_pkthdr *pkthdr)
 			}
 		}
 
+		/* DARLING: Darling's xnu headers predate BPF_PKTFLAGS_WAKE_PKT */
+#ifdef BPF_PKTFLAGS_WAKE_PKT
 		if (bhep->bh_pktflags & BPF_PKTFLAGS_WAKE_PKT) {
 			bzero(&tmpbuf, sizeof (tmpbuf));
 			tlen = snprintf(tmpbuf, sizeof (tmpbuf),
@@ -1289,6 +1313,7 @@ pcap_read_bpf_header(pcap_t *p, u_char *bp, struct pcap_pkthdr *pkthdr)
 				strsep = ", ";
 			}
 		}
+#endif /* BPF_PKTFLAGS_WAKE_PKT */
 #ifdef BPF_PKTFLAGS_ULPN
 
 		if (bhep->bh_pktflags & BPF_PKTFLAGS_ULPN) {
@@ -1341,6 +1366,8 @@ pcap_read_bpf_header(pcap_t *p, u_char *bp, struct pcap_pkthdr *pkthdr)
 			strsep = ", ";
 		}
 	}
+	/* DARLING: Darling's xnu headers predate bh_trace_tag */
+#ifndef DARLING
 	if (bhep->bh_trace_tag > 0) {
 		bzero(&tmpbuf, sizeof (tmpbuf));
 		tlen = snprintf(tmpbuf, sizeof (tmpbuf),
@@ -1350,6 +1377,7 @@ pcap_read_bpf_header(pcap_t *p, u_char *bp, struct pcap_pkthdr *pkthdr)
 			strsep = ", ";
 		}
 	}
+#endif
 #if BPF_HDR_EXT_HAS_COMP_GENCNT
 	if (bhep->bh_comp_gencnt > 0) {
 		bzero(&tmpbuf, sizeof (tmpbuf));
@@ -1586,9 +1614,12 @@ pcap_ng_dump_pktap_v2(pcap_t *pcap, pcap_dumper_t *dumper,
 	if (pktap_v2_hdr->pth_flags & PTH_FLAG_NEXUS_CHAN) {
 		pmdflags |= PCAPNG_EPB_PMDF_NEXUS_CHANNEL;
 	}
+	/* DARLING: Darling's xnu headers predate PTH_FLAG_WAKE_PKT */
+#ifdef PTH_FLAG_WAKE_PKT
 	if (pktap_v2_hdr->pth_flags & PTH_FLAG_WAKE_PKT) {
 		pmdflags |= PCAPNG_EPB_PMDF_WAKE_PKT;
 	}
+#endif
 #ifdef PTH_FLAG_ULPN
 	if (pktap_v2_hdr->pth_flags & PTH_FLAG_ULPN) {
 		pmdflags |= PCAPNG_EPB_PMDF_ULPN_PKT;
@@ -1619,7 +1650,13 @@ pcap_ng_dump_init_section_info(pcap_dumper_t *dumper)
 int
 pcap_set_max_write_size(pcap_t *pcap, u_int max_write_size)
 {
+	/* DARLING: Darling's xnu headers predate BIOCSWRITEMAX */
+#ifdef BIOCSWRITEMAX
 	if (ioctl(pcap->fd, BIOCSWRITEMAX, &max_write_size) != 0) {
+#else
+	errno = EOPNOTSUPP;
+	{
+#endif
 		snprintf(pcap->errbuf, PCAP_ERRBUF_SIZE,
 			 "%s: BIOCSWRITEMAX errno %d", __func__, errno);
 		return PCAP_ERROR;
@@ -1630,7 +1667,13 @@ pcap_set_max_write_size(pcap_t *pcap, u_int max_write_size)
 int
 pcap_get_max_write_size(pcap_t *pcap, u_int *max_write_size_ptr)
 {
+	/* DARLING: Darling's xnu headers predate BIOCGWRITEMAX */
+#ifdef BIOCGWRITEMAX
 	if (ioctl(pcap->fd, BIOCGWRITEMAX, max_write_size_ptr) != 0) {
+#else
+	errno = EOPNOTSUPP;
+	{
+#endif
 		snprintf(pcap->errbuf, PCAP_ERRBUF_SIZE,
 			 "%s: BIOCGWRITEMAX errno %d", __func__, errno);
 		return PCAP_ERROR;
@@ -1641,7 +1684,13 @@ pcap_get_max_write_size(pcap_t *pcap, u_int *max_write_size_ptr)
 int
 pcap_set_send_multiple(pcap_t *pcap, int value)
 {
+	/* DARLING: Darling's xnu headers predate BIOCSBATCHWRITE */
+#ifdef BIOCSBATCHWRITE
 	if (ioctl(pcap->fd, BIOCSBATCHWRITE, &value) != 0) {
+#else
+	errno = EOPNOTSUPP;
+	if (1) {
+#endif
 		snprintf(pcap->errbuf, PCAP_ERRBUF_SIZE,
 			 "%s: BIOCSBATCHWRITE errno %d", __func__, errno);
 		return PCAP_ERROR;
@@ -1654,7 +1703,13 @@ pcap_set_send_multiple(pcap_t *pcap, int value)
 int
 pcap_get_send_multiple(pcap_t *pcap, int *value_ptr)
 {
+	/* DARLING: Darling's xnu headers predate BIOCGBATCHWRITE */
+#ifdef BIOCGBATCHWRITE
 	if (ioctl(pcap->fd, BIOCGBATCHWRITE, value_ptr) != 0) {
+#else
+	errno = EOPNOTSUPP;
+	{
+#endif
 		snprintf(pcap->errbuf, PCAP_ERRBUF_SIZE,
 			 "%s: BIOCGBATCHWRITE errno %d", __func__, errno);
 		return PCAP_ERROR;

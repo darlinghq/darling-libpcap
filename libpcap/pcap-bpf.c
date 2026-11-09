@@ -1323,6 +1323,8 @@ pcap_read_bpf(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 #ifdef __APPLE__
 			pcap_read_bpf_header(p, bp, &pkthdr);
 
+			/* DARLING: Darling's xnu headers predate BPF header compression */
+#ifdef BIOCSHDRCOMP
 			if (p->compression_mode == 1) {
 				uint8_t complen;
 
@@ -1365,7 +1367,9 @@ pcap_read_bpf(pcap_t *p, int cnt, pcap_handler callback, u_char *user)
 				}
 				p->prev_datap = datap;
 				p->prev_caplen = caplen + complen;
-			} else if (p->compression_mode == 2) {
+			} else
+#endif /* BIOCSHDRCOMP */
+			if (p->compression_mode == 2) {
 				if (p->prev_datap != NULL) {
 					uint8_t common_prefix_size = get_common_prefix_size(datap, p->prev_datap, MIN(caplen, p->prev_caplen));
 					if (common_prefix_size > 0) {
@@ -1948,6 +1952,8 @@ pcap_activate_bpf(pcap_t *p)
 	}
 
 	v = p->compression_mode;
+	/* DARLING: Darling's xnu headers predate BPF header compression */
+#ifdef BIOCSHDRCOMP
 	if (v == 1) {
 		if (ioctl(p->fd, BIOCSHDRCOMP, &v) != 0) {
 			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "BIOCSHDRCOMP: %s",
@@ -1981,6 +1987,7 @@ pcap_activate_bpf(pcap_t *p)
 		}
 #endif /* BIOCSHDRCOMPON */
 	}
+#endif /* BIOCSHDRCOMP */
 	if (p->head_drop != 0) {
 		v = 1;
 		if (ioctl(p->fd, BIOCSHEADDROP, &v) != 0) {
